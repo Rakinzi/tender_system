@@ -125,7 +125,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = "en-us"
 
-TIME_ZONE = "CAT"
+TIME_ZONE = "Africa/Harare"
 
 USE_I18N = True
 
@@ -145,3 +145,4 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # settings.py
 MEDIA_ROOT = BASE_DIR / 'media'  # Where files are stored
 MEDIA_URL = '/media/'            # URL to access files in development
+

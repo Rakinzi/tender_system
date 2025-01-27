@@ -9,7 +9,7 @@ class DocumentSerializer(serializers.ModelSerializer):
 
 
 class TenderCreateSerializer(serializers.ModelSerializer):
-    documents = DocumentSerializer(many=True, rqeuired=False)
+    documents = DocumentSerializer(many=True, required=False)
     timeline = serializers.JSONField(required=False)
 
     class Meta:
