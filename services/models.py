@@ -4,6 +4,10 @@ from datetime import timedelta
 
 # Create your models here.
 
+
+
+
+
 class Company(models.Model):
     company_id = models.AutoField(primary_key=True)
     company_name = models.CharField(max_length=50)
@@ -228,3 +232,14 @@ class CV(models.Model):
 
     def __str__(self):
         return f"CV - {self.user.first_name} {self.user.last_name}"
+    
+# models.py (Token model)
+
+class Token(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    token = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+
+    class Meta:
+        db_table = 'tokens'
