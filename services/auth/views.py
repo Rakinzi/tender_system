@@ -12,7 +12,7 @@ from .serializers import RegisterSerializer, LoginSerializer
 
 # Utility function to generate JWT token
 def generate_token(user):
-    expiration_time = now() + datetime.timedelta(hours=1)  # Token expires in 1 hour
+    expiration_time = now() + datetime.timedelta(days= 7)  # Token expires in 1 hour
     payload = {
         'user_id': user.user_id,
         'email': user.email,
