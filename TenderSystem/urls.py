@@ -5,6 +5,7 @@ from services.department.views import DepartmentViewSet
 from rest_framework.routers import DefaultRouter
 from services.tender.views import TenderViewSet
 from services.tender_category.views import TenderCategoryViewSet
+from services.auth.views import RegisterView, LoginView
 
 
 
@@ -15,8 +16,7 @@ tender.register(r"departments", DepartmentViewSet)
 tender.register(r"tenders", TenderViewSet)
 tender.register(r"tender_categories", TenderCategoryViewSet)
 
-# urls.py
-from services.auth.views import RegisterView, LoginView
+
 
 urlpatterns = [
     path("api/", include(tender.urls)),

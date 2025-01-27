@@ -7,15 +7,24 @@ from rest_framework import serializers, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.exceptions import AuthenticationFailed
+from django.shortcuts import redirect
 from ..models import User, Token
 from .serializers import RegisterSerializer, LoginSerializer
 
+# Role-based redirection URLs (Temporary placeholders)
+ROLE_REDIRECT_URLS = {
+    'Admin': '/admin_dashboard/',
+    'Manager': '/manager_dashboard/',
+    'Employee': '/employee_dashboard/',
+}
+
 # Utility function to generate JWT token
 def generate_token(user):
-    expiration_time = now() + datetime.timedelta(days= 7)  # Token expires in 1 hour
+    expiration_time = now() + datetime.timedelta(days=7)  # Token expires in 1 hour
     payload = {
         'user_id': user.user_id,
         'email': user.email,
+        'role': user.role,
         'exp': expiration_time.timestamp()
     }
     token = jwt.encode(payload, settings.SECRET_KEY, algorithm='HS256')
@@ -31,7 +40,7 @@ class RegisterView(APIView):
                 user = serializer.save()
                 activation_expiry = now() + datetime.timedelta(days=7)
                 Token.objects.create(user=user, token='ACTIVATION_TOKEN', expires_at=activation_expiry)
-                return Response({'message': 'User registered successfully', 'email': user.email}, status=status.HTTP_201_CREATED)
+                return Response({'message': 'User registered successfully', 'email': user.email, 'role': user.role}, status=status.HTTP_201_CREATED)
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -49,7 +58,8 @@ class LoginView(APIView):
                     raise AuthenticationFailed('Invalid username or password')
                 token = generate_token(user)
                 print(f'Token: {token}')
-                return Response({'token': token}, status=status.HTTP_200_OK)
+                redirect_url = ROLE_REDIRECT_URLS.get(user.role, '/default_dashboard/')
+                return Response({'token': token, 'redirect_url': redirect_url}, status=status.HTTP_200_OK)
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         except AuthenticationFailed as e:
             return Response({'error': str(e)}, status=status.HTTP_401_UNAUTHORIZED)
