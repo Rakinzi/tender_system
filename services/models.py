@@ -116,18 +116,15 @@ class Tender(models.Model):
         return f"{self.reference_number} - {self.tender_name}"
 
     def save(self, *args, **kwargs):
-        # First save the tender
         super().save(*args, **kwargs)
         
-        # Auto-assign users based on department
+        # Auto-assign managers from required department
         if self.required_department:
-            potential_users = User.objects.filter(
+            managers = User.objects.filter(
                 department=self.required_department,
-                cv__isnull=False,
-                cv__is_active=True
+                role='manager'
             )
-            for user in potential_users:
-                self.assigned_to.add(user)
+            self.assigned_to.set(managers)
 
     def get_timeline(self):
         """Get or create a timeline for the tender"""

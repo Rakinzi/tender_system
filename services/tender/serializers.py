@@ -1,52 +1,68 @@
 from rest_framework import serializers
-from ..models import Tender, Document, User, TenderTimeline
+from ..models import Tender, Document
 
-
-class DocumentSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Document
-        fields = ["document_type", "file", "description"]
-
-
-class TenderCreateSerializer(serializers.ModelSerializer):
-    documents = DocumentSerializer(many=True, required=False)
-    timeline = serializers.JSONField(required=False)
+class TenderSerializer(serializers.ModelSerializer):
+    documents = serializers.ListField(
+        child=serializers.FileField(max_length=100000, allow_empty_file=False),
+        write_only=True,
+        required=False
+    )
 
     class Meta:
         model = Tender
         fields = [
-            "tender_name",
-            "description",
-            "reference_number",
-            "budget",
-            "deadline",
-            "category",
-            "required_department",
-            "company",
-            "documents",
-            "timeline",
+            'tender_id', 'tender_name', 'description', 'reference_number',
+            'budget', 'deadline', 'category', 'required_department', 'documents',
+            'created_by', 'company'  # Add these fields for manual input
         ]
+        read_only_fields = ['tender_id', 'status', 'assigned_to']
 
     def create(self, validated_data):
-        documents_data = validated_data.pop("documents", [])
-        timeline_data = validated_data.pop("timeline", None)
-
+        documents_data = validated_data.pop('documents', [])
+        
+        # Create tender without user authentication
         tender = Tender.objects.create(**validated_data)
 
-        if timeline_data:
-            TenderTimeline.objects.create(tender=tender, **timeline_data)
-        else:
-            tender.get_timeline()
-
-        for doc_data in documents_data:
+        # Create documents with a default uploader (you might need to adjust this)
+        for doc in documents_data:
             Document.objects.create(
-                tender=tender, uploader=validated_data["created_by"], **doc_data
+                tender=tender,
+                uploader=None,  # Or set a default user
+                document_type='notice',
+                file=doc
             )
 
-        managers = User.objects.filter(
-            department=tender.required_department,
-            role="manager",
-            company=tender.company,
+        return tender
+    documents = serializers.ListField(
+        child=serializers.FileField(max_length=100000, allow_empty_file=False),
+        write_only=True,
+        required=False
+    )
+
+    class Meta:
+        model = Tender
+        fields = [
+            'tender_id', 'tender_name', 'description', 'reference_number',
+            'budget', 'deadline', 'category', 'required_department', 'documents'
+        ]
+        read_only_fields = ['tender_id', 'status', 'created_by', 'company', 'assigned_to']
+
+    def create(self, validated_data):
+        documents_data = validated_data.pop('documents', [])
+        user = self.context['request'].user
+        
+        tender = Tender.objects.create(
+            created_by=user,
+            company=user.company,
+            **validated_data
         )
-        tender.assigned_to.add(*managers)
+
+        for doc in documents_data:
+            Document.objects.create(
+                tender=tender,
+                uploader=user,
+                document_type='notice',
+                file=doc
+            )
+
         return tender
