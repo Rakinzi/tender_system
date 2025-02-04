@@ -10,10 +10,13 @@ from services.auth.views import (
 from rest_framework_simplejwt.views import TokenRefreshView
 from services.company.views import CompanyViewSet
 from services.department.views import DepartmentViewSet
+from services.tender.views import TenderViewSet
 
 tender_router = DefaultRouter()
 tender_router.register(r'companies', CompanyViewSet, basename='company')
 tender_router.register(r'departments', DepartmentViewSet, basename='department')
+tender_router.register(r'tenders', TenderViewSet, basename='tender')
+
 
 
 urlpatterns = [
