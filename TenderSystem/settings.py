@@ -112,7 +112,7 @@ DATABASES = {
         "ENGINE": "django.db.backends.mysql",
         "NAME": "tender_system",       
         "USER": "sean",                
-        "PASSWORD":  "fullstack", #"@Changeme123",   
+        "PASSWORD":  "voltamol", #"@Changeme123",   
         "HOST": "localhost",          
         "PORT": "3307",                
         "OPTIONS": {
