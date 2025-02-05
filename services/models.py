@@ -2,6 +2,7 @@ from django.db import models
 from django.core.exceptions import ValidationError
 from datetime import timedelta
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
+from django.utils import timezone
 
 class Company(models.Model):
     company_id = models.AutoField(primary_key=True)
@@ -104,27 +105,44 @@ class TenderCategory(models.Model):
 class TenderTimeline(models.Model):
     timeline_id = models.AutoField(primary_key=True)
     tender = models.OneToOneField('Tender', on_delete=models.CASCADE, related_name='timeline')
-    submission_start = models.DateTimeField()
-    submission_end = models.DateTimeField()
-    evaluation_start = models.DateTimeField()
-    evaluation_end = models.DateTimeField()
-    award_date = models.DateTimeField()
-    project_start_date = models.DateTimeField()
-    project_end_date = models.DateTimeField()
+    submission_start = models.DateTimeField(null=True, blank=True)
+    submission_end = models.DateTimeField(null=True, blank=True)
+    evaluation_start = models.DateTimeField(null=True, blank=True)
+    evaluation_end = models.DateTimeField(null=True, blank=True)
+    award_date = models.DateTimeField(null=True, blank=True)
+    project_start_date = models.DateTimeField(null=True, blank=True)
+    project_end_date = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table = 'tender_timelines'
 
-    def clean(self):
-        if self.submission_start and self.submission_end and self.submission_start > self.submission_end:
-            raise ValidationError('Submission start date must be before end date')
-        if self.evaluation_start and self.evaluation_end and self.evaluation_start > self.evaluation_end:
-            raise ValidationError('Evaluation start date must be before end date')
-        if self.project_start_date and self.project_end_date and self.project_start_date > self.project_end_date:
-            raise ValidationError('Project start date must be before end date')
+    def update_dates_based_on_status(self, status):
+        """Update timeline dates based on tender status"""
+        now = timezone.now()
         
+        if status == 'draft':
+            self.submission_start = now
+        elif status == 'in_review':
+            if not self.submission_end:
+                self.submission_end = now
+            if not self.evaluation_start:
+                self.evaluation_start = now
+        elif status == 'approved':
+            if not self.evaluation_end:
+                self.evaluation_end = now
+        elif status == 'awarded':
+            if not self.award_date:
+                self.award_date = now
+            if not self.project_start_date:
+                self.project_start_date = now + timedelta(days=30)
+        elif status == 'closed':
+            if not self.project_end_date:
+                self.project_end_date = now
+        
+        self.save()
+         
 class Tender(models.Model):
     TENDER_STATUS = [
         ('draft', 'Draft'),
@@ -278,3 +296,4 @@ class Token(models.Model):
 
     class Meta:
         db_table = 'tokens'
+

@@ -11,11 +11,13 @@ from rest_framework_simplejwt.views import TokenRefreshView
 from services.company.views import CompanyViewSet
 from services.department.views import DepartmentViewSet
 from services.tender.views import TenderViewSet
+from services.tender_category.views import TenderCategoryViewSet
 
 tender_router = DefaultRouter()
 tender_router.register(r'companies', CompanyViewSet, basename='company')
 tender_router.register(r'departments', DepartmentViewSet, basename='department')
 tender_router.register(r'tenders', TenderViewSet, basename='tender')
+tender_router.register(r'tender-categories', TenderCategoryViewSet, basename='tender-category')
 
 
 
