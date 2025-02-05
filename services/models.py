@@ -26,7 +26,6 @@ class Department(models.Model):
     class Meta:
         db_table = 'departments'
         
-
 class CustomUserManager(BaseUserManager):
     def create_user(self, email, password=None, **extra_fields):
         if not email:
@@ -88,7 +87,6 @@ class User(AbstractBaseUser, PermissionsMixin):
     def id(self):
         return self.user_id
         
-                   
 class TenderCategory(models.Model):
     category_id = models.AutoField(primary_key=True)
     name = models.CharField(max_length=50, unique=True)
@@ -102,7 +100,6 @@ class TenderCategory(models.Model):
 
     def __str__(self):
         return self.name
-
 
 class TenderTimeline(models.Model):
     timeline_id = models.AutoField(primary_key=True)
@@ -185,7 +182,7 @@ class Tender(models.Model):
             }
         )
         return timeline 
-    
+
 def document_upload_path(instance, filename):
     return f"uploads/documents/{instance.document_type}/{filename}"
 
