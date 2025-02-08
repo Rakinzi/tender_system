@@ -12,12 +12,17 @@ from services.company.views import CompanyViewSet
 from services.department.views import DepartmentViewSet
 from services.tender.views import TenderViewSet
 from services.tender_category.views import TenderCategoryViewSet
+from services.users.views import UserViewSet
+from django.conf import settings
+from django.conf.urls.static import static
+
 
 tender_router = DefaultRouter()
 tender_router.register(r'companies', CompanyViewSet, basename='company')
 tender_router.register(r'departments', DepartmentViewSet, basename='department')
 tender_router.register(r'tenders', TenderViewSet, basename='tender')
 tender_router.register(r'tender-categories', TenderCategoryViewSet, basename='tender-category')
+tender_router.register(r'users', UserViewSet, basename='user')
 
 
 
@@ -30,6 +35,6 @@ urlpatterns = [
     path('api/auth/change-password/', change_password, name='change-password'),
     
     path('api/', include(tender_router.urls)),
-]
+] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
  
