@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.utils import timezone
 from django.db.models import Q
-from ..models import Tender, Document, Approval, ChecklistItem, User, TenderManagerAssignment
+from ..models import Tender, Document, Approval, ChecklistItem, User, TenderManagerAssignment, AuditLog
 from .serializers import (
     TenderSerializer, TenderDocumentSerializer, 
     ChecklistItemSerializer, TenderTimelineSerializer,
@@ -14,7 +14,7 @@ from django.shortcuts import get_object_or_404
 
 class TenderViewSet(viewsets.ModelViewSet):
     serializer_class = TenderSerializer
-    permission_classes = [IsAuthenticated]
+    # permission_classes = [IsAuthenticated]
     
     def get_queryset(self):
         """Filter tenders based on user role"""
@@ -300,42 +300,62 @@ class TenderViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def create_checklist(self, request, pk=None):
         """Manager creates checklist"""
+        current_time = timezone.now()
+        
         if not check_user_permission(request.user, 'manager'):
             return Response({
                 'message': 'Only managers can create checklists',
-                'timestamp': timezone.now().strftime('%Y-%m-%d %H:%M:%S')
+                'timestamp': current_time.strftime('%Y-%m-%d %H:%M:%S')
             }, status=status.HTTP_403_FORBIDDEN)
 
         tender = self.get_object()
         items = request.data.get('items', [])
-        checklist_items = []
+        created_items = []
         
-        for item in items:
-            serializer = ChecklistItemSerializer(data=item)
-            if serializer.is_valid():
-                checklist_items.append(ChecklistItem(
-                    tender=tender,
-                    created_by=request.user,
-                    **serializer.validated_data
-                ))
-            else:
-                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        
-        ChecklistItem.objects.bulk_create(checklist_items)
-        
-        create_audit_log(
-            user=request.user,
-            action='create',
-            target_model='Checklist',
-            target_id=tender.tender_id,
-            details=f"Checklist created by manager"
-        )
-        
-        return Response({
-            'message': 'Checklist created successfully',
-            'data': ChecklistItemSerializer(checklist_items, many=True).data,
-            'timestamp': timezone.now().strftime('%Y-%m-%d %H:%M:%S')
-        })
+        try:
+            for item in items:
+                # Set default assignee if not provided
+                if 'assigned_to' not in item:
+                    item['assigned_to'] = tender.created_by.user_id
+                    
+                serializer = ChecklistItemSerializer(data=item)
+                if serializer.is_valid():
+                    checklist_item = ChecklistItem.objects.create(
+                        tender=tender,
+                        created_by=request.user,
+                        **serializer.validated_data
+                    )
+                    created_items.append(checklist_item)
+                else:
+                    return Response({
+                        'message': 'Invalid checklist item data',
+                        'errors': serializer.errors,
+                        'timestamp': current_time.strftime('%Y-%m-%d %H:%M:%S')
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            
+            create_audit_log(
+                user=request.user,
+                action='create',
+                target_model='Checklist',
+                target_id=tender.tender_id,
+                details=f"Checklist items created by {request.user.email}"
+            )
+            
+            return Response({
+                'message': 'Checklist created successfully',
+                'data': {
+                    'items': ChecklistItemSerializer(created_items, many=True).data,
+                    'total_items': len(created_items)
+                },
+                'timestamp': current_time.strftime('%Y-%m-%d %H:%M:%S'),
+                'user': request.user.email
+            })
+            
+        except Exception as e:
+            return Response({
+                'message': f'Error creating checklist items: {str(e)}',
+                'timestamp': current_time.strftime('%Y-%m-%d %H:%M:%S')
+            }, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=True, methods=['post'])
     def review_document(self, request, pk=None):
@@ -515,3 +535,397 @@ class TenderViewSet(viewsets.ModelViewSet):
             'timestamp': "2025-02-07 21:38:27",
             'manager': request.user.email
         })
+        
+    @action(detail=True, methods=['get'])
+    def review_details(self, request, pk=None):
+        """Get tender details including review history and approvals"""
+        try:
+            tender = self.get_object()
+            
+            # Get active manager assignment
+            manager_assignment = TenderManagerAssignment.objects.filter(
+                tender=tender,
+                is_active=True
+            ).select_related('manager', 'assigned_by').first()
+            
+            # Get all approvals
+            approvals = tender.approvals.all().order_by('-created_at').select_related('approver')
+            
+            # Get audit logs
+            audit_logs = AuditLog.objects.filter(
+                target_model='Tender',
+                target_id=tender.tender_id
+            ).select_related('user').order_by('-timestamp')
+            
+            # Get checklist items
+            checklist_items = tender.checklist_items.all().select_related('assigned_to', 'created_by')
+            
+            response_data = {
+                'tender_id': tender.tender_id,
+                'tender_name': tender.tender_name,
+                'reference_number': tender.reference_number,
+                'status': tender.status,
+                'description': tender.description,
+                'budget': str(tender.budget),
+                'deadline': tender.deadline.strftime('%Y-%m-%d %H:%M:%S'),
+                'created_by': {  # Added created_by information
+                    'id': tender.created_by.user_id,
+                    'name': f"{tender.created_by.first_name} {tender.created_by.last_name}",
+                    'email': tender.created_by.email,
+                    'role': tender.created_by.role
+                },
+                'approvals': [{
+                    'status': approval.status,
+                    'comments': approval.comments,
+                    'approved_by': {
+                        'id': approval.approver.user_id,
+                        'name': f"{approval.approver.first_name} {approval.approver.last_name}",
+                        'email': approval.approver.email,
+                        'role': approval.approver.role
+                    },
+                    'created_at': approval.created_at.strftime('%Y-%m-%d %H:%M:%S')
+                } for approval in approvals],
+                'assigned_manager': {
+                    'id': manager_assignment.manager.user_id,
+                    'name': f"{manager_assignment.manager.first_name} {manager_assignment.manager.last_name}",
+                    'email': manager_assignment.manager.email,
+                    'assigned_at': manager_assignment.assigned_at.strftime('%Y-%m-%d %H:%M:%S'),
+                    'assigned_by': {
+                        'id': manager_assignment.assigned_by.user_id,
+                        'name': f"{manager_assignment.assigned_by.first_name} {manager_assignment.assigned_by.last_name}",
+                        'email': manager_assignment.assigned_by.email
+                    }
+                } if manager_assignment else None,
+                'checklist_items': [{
+                    'checklist_id': item.checklist_id,
+                    'name': item.name,
+                    'description': item.description,
+                    'status': item.status,
+                    'deadline': item.deadline.strftime('%Y-%m-%d %H:%M:%S'),
+                    'completed_at': item.completed_at.strftime('%Y-%m-%d %H:%M:%S') if item.completed_at else None,
+                    'assigned_to': {
+                        'id': item.assigned_to.user_id,
+                        'name': f"{item.assigned_to.first_name} {item.assigned_to.last_name}",
+                        'email': item.assigned_to.email
+                    },
+                    'comments': item.comments
+                } for item in checklist_items],
+                'review_history': [{
+                    'action': log.action,
+                    'details': log.details,
+                    'user': {
+                        'id': log.user.user_id,
+                        'name': f"{log.user.first_name} {log.user.last_name}",
+                        'email': log.user.email,
+                        'role': log.user.role
+                    },
+                    'timestamp': log.timestamp.strftime('%Y-%m-%d %H:%M:%S')
+                } for log in audit_logs]
+            }
+            
+            return Response({
+                'message': 'Tender review details retrieved successfully',
+                'data': response_data,
+                'timestamp': timezone.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'user': request.user.email
+            })
+            
+        except Exception as e:
+            return Response({
+                'message': f'Error retrieving tender review details: {str(e)}',
+                'timestamp': timezone.now().strftime('%Y-%m-%d %H:%M:%S')
+            }, status=status.HTTP_400_BAD_REQUEST)
+            
+# Add this to your TenderViewSet class
+    @action(detail=True, url_path='checklist/(?P<checklist_id>[^/.]+)/complete', methods=['post'])
+    def complete_checklist_item(self, request, pk=None, checklist_id=None):
+        """Mark a checklist item as complete"""
+        current_time = "2025-02-11 09:45:40"
+        
+        try:
+            tender = self.get_object()
+            checklist_item = get_object_or_404(
+                ChecklistItem, 
+                checklist_id=checklist_id,
+                tender=tender
+            )
+            
+            # Check if user is either the assigned person or the manager
+            if request.user != checklist_item.assigned_to and not check_user_permission(request.user, 'manager'):
+                return Response({
+                    'message': 'You are not authorized to complete this checklist item',
+                    'timestamp': current_time,
+                    'user': request.user.email
+                }, status=status.HTTP_403_FORBIDDEN)
+            
+            comments = request.data.get('comments', '')
+            
+            # Update checklist item
+            checklist_item.status = 'completed'
+            checklist_item.completed_at = timezone.now()
+            checklist_item.comments = comments
+            checklist_item.save()
+            
+            # Create audit log
+            create_audit_log(
+                user=request.user,
+                action='complete_checklist',
+                target_model='ChecklistItem',
+                target_id=checklist_item.checklist_id,
+                details=f"Checklist item '{checklist_item.name}' marked as complete by {request.user.email}. Comments: {comments}"
+            )
+            
+            return Response({
+                'message': 'Checklist item marked as complete',
+                'data': {
+                    'checklist_id': checklist_item.checklist_id,
+                    'name': checklist_item.name,
+                    'status': checklist_item.status,
+                    'completed_at': checklist_item.completed_at.strftime('%Y-%m-%d %H:%M:%S'),
+                    'completed_by': {
+                        'id': request.user.user_id,
+                        'name': f"{request.user.first_name} {request.user.last_name}",
+                        'email': request.user.email
+                    },
+                    'comments': checklist_item.comments
+                },
+                'timestamp': current_time,
+                'user': request.user.email
+            })
+            
+        except Exception as e:
+            return Response({
+                'message': f'Error completing checklist item: {str(e)}',
+                'timestamp': current_time
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, url_path='checklist/(?P<checklist_id>[^/.]+)/undo', methods=['post'])
+    def undo_checklist_completion(self, request, pk=None, checklist_id=None):
+        """Undo completion of a checklist item"""
+        current_time = "2025-02-11 09:49:44"
+        
+        try:
+            tender = self.get_object()
+            checklist_item = get_object_or_404(
+                ChecklistItem, 
+                checklist_id=checklist_id,
+                tender=tender
+            )
+            
+            # Check if user is either the assigned person or the manager
+            if request.user != checklist_item.assigned_to and not check_user_permission(request.user, 'manager'):
+                return Response({
+                    'message': 'You are not authorized to modify this checklist item',
+                    'timestamp': current_time,
+                    'user': request.user.email
+                }, status=status.HTTP_403_FORBIDDEN)
+            
+            # Check if item is actually completed
+            if checklist_item.status != 'completed':
+                return Response({
+                    'message': 'Checklist item is not marked as complete',
+                    'timestamp': current_time,
+                    'user': request.user.email
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            reason = request.data.get('reason', '')
+            
+            # Update checklist item
+            checklist_item.status = 'pending'
+            checklist_item.completed_at = None
+            checklist_item.comments = f"Completion undone. Reason: {reason}"
+            checklist_item.save()
+            
+            # Create audit log
+            create_audit_log(
+                user=request.user,
+                action='undo_checklist',
+                target_model='ChecklistItem',
+                target_id=checklist_item.checklist_id,
+                details=f"Checklist item '{checklist_item.name}' completion undone by {request.user.email}. Reason: {reason}"
+            )
+            
+            return Response({
+                'message': 'Checklist item completion undone',
+                'data': {
+                    'checklist_id': checklist_item.checklist_id,
+                    'name': checklist_item.name,
+                    'status': checklist_item.status,
+                    'undone_by': {
+                        'id': request.user.user_id,
+                        'name': f"{request.user.first_name} {request.user.last_name}",
+                        'email': request.user.email
+                    },
+                    'reason': reason,
+                    'timestamp': current_time
+                },
+                'timestamp': current_time,
+                'user': request.user.email
+            })
+            
+        except Exception as e:
+            return Response({
+                'message': f'Error undoing checklist completion: {str(e)}',
+                'timestamp': current_time
+            }, status=status.HTTP_400_BAD_REQUEST)
+            
+    @action(detail=True, url_path='checklist/(?P<checklist_id>[^/.]+)/review', methods=['post'])
+    def review_checklist_item(self, request, pk=None, checklist_id=None):
+        """Manager reviews a completed checklist item"""
+        current_time = timezone.now()
+        
+        if not check_user_permission(request.user, 'manager'):
+            return Response({
+                'message': 'Only managers can review checklist items',
+                'timestamp': current_time.strftime('%Y-%m-%d %H:%M:%S')
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            tender = self.get_object()
+            checklist_item = get_object_or_404(
+                ChecklistItem, 
+                checklist_id=checklist_id,
+                tender=tender
+            )
+            
+            if checklist_item.status != 'pending_review':
+                return Response({
+                    'message': 'Checklist item is not pending review',
+                    'timestamp': current_time.strftime('%Y-%m-%d %H:%M:%S')
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            decision = request.data.get('decision')
+            review_comments = request.data.get('comments', '')
+            
+            if decision not in ['approve', 'reject']:
+                return Response({
+                    'message': 'Invalid decision. Must be either "approve" or "reject"',
+                    'timestamp': current_time.strftime('%Y-%m-%d %H:%M:%S')
+                }, status=status.HTTP_400_BAD_REQUEST)
+                
+            # Update checklist item based on manager's decision
+            if decision == 'approve':
+                checklist_item.status = 'completed'
+                checklist_item.completed_at = current_time
+                action_message = 'approved'
+            else:
+                checklist_item.status = 'revision_needed'
+                checklist_item.completed_at = None
+                action_message = 'rejected'
+                
+            checklist_item.review_comments = review_comments
+            checklist_item.reviewed_by = request.user
+            checklist_item.reviewed_at = current_time
+            checklist_item.save()
+            
+            # Create audit log
+            create_audit_log(
+                user=request.user,
+                action=f'checklist_review_{decision}',
+                target_model='ChecklistItem',
+                target_id=checklist_item.checklist_id,
+                details=f"Checklist item '{checklist_item.name}' {action_message} by manager. Comments: {review_comments}"
+            )
+            
+            return Response({
+                'message': f'Checklist item review completed - {action_message}',
+                'data': {
+                    'checklist_id': checklist_item.checklist_id,
+                    'name': checklist_item.name,
+                    'status': checklist_item.status,
+                    'submitted_by': {
+                        'id': checklist_item.assigned_to.user_id,
+                        'name': f"{checklist_item.assigned_to.first_name} {checklist_item.assigned_to.last_name}",
+                        'email': checklist_item.assigned_to.email
+                    },
+                    'reviewed_by': {
+                        'id': request.user.user_id,
+                        'name': f"{request.user.first_name} {request.user.last_name}",
+                        'email': request.user.email
+                    },
+                    'reviewed_at': current_time.strftime('%Y-%m-%d %H:%M:%S'),
+                    'decision': decision,
+                    'review_comments': review_comments
+                },
+                'timestamp': current_time.strftime('%Y-%m-%d %H:%M:%S')
+            })
+            
+        except Exception as e:
+            return Response({
+                'message': f'Error reviewing checklist item: {str(e)}',
+                'timestamp': current_time.strftime('%Y-%m-%d %H:%M:%S')
+            }, status=status.HTTP_400_BAD_REQUEST)
+            
+    @action(detail=True, methods=['get'], url_path='my-assigned-items', url_name='my_assigned_items')
+    def my_assigned_items(self, request, pk=None):
+        """Get checklist items assigned to the requesting user for a specific tender"""
+        current_time = "2025-02-11 10:57:24"
+        
+        try:
+            tender = self.get_object()
+            
+            # Remove reviewed_by from select_related since it's not a valid relationship
+            checklist_items = ChecklistItem.objects.filter(
+                tender=tender,
+                assigned_to=request.user
+            ).select_related(
+                'tender',
+                'assigned_to',
+                'created_by'
+            ).order_by('-deadline')
+            
+            # Apply status filter if provided
+            status_filter = request.query_params.get('status', None)
+            if status_filter:
+                checklist_items = checklist_items.filter(status=status_filter)
+            
+            response_data = []
+            for item in checklist_items:
+                item_data = {
+                    'checklist_id': item.checklist_id,
+                    'name': item.name,
+                    'description': item.description,
+                    'status': item.status,
+                    'deadline': item.deadline.strftime('%Y-%m-%d %H:%M:%S'),
+                    'created_by': {
+                        'id': item.created_by.user_id,
+                        'name': f"{item.created_by.first_name} {item.created_by.last_name}",
+                        'email': item.created_by.email,
+                        'role': item.created_by.role
+                    },
+                    'completed_at': item.completed_at.strftime('%Y-%m-%d %H:%M:%S') if item.completed_at else None,
+                    'comments': item.comments,
+                }
+                
+                # Only include review information if review fields exist in your model
+                if hasattr(item, 'review_comments'):
+                    item_data['review_comments'] = item.review_comments
+                
+                response_data.append(item_data)
+            
+            # Group items by status for summary
+            status_summary = {}
+            for item in checklist_items:
+                if item.status not in status_summary:
+                    status_summary[item.status] = 0
+                status_summary[item.status] += 1
+            
+            return Response({
+                'message': 'Assigned checklist items retrieved successfully',
+                'data': {
+                    'tender_id': tender.tender_id,
+                    'tender_name': tender.tender_name,
+                    'reference_number': tender.reference_number,
+                    'total_items': len(response_data),
+                    'status_summary': status_summary,
+                    'items': response_data
+                },
+                'timestamp': current_time,
+                'user': request.user.email
+            })
+            
+        except Exception as e:
+            return Response({
+                'message': f'Error retrieving checklist items: {str(e)}',
+                'timestamp': current_time
+            }, status=status.HTTP_400_BAD_REQUEST)

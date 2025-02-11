@@ -71,5 +71,12 @@ class TenderSerializer(serializers.ModelSerializer):
 class ChecklistItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = ChecklistItem
-        fields = '__all__'
+        fields = [
+            'name', 
+            'description', 
+            'assigned_to', 
+            'deadline', 
+            'status',
+            'comments'
+        ]  # Remove tender from required fields
         read_only_fields = ['created_by']
